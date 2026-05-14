@@ -352,12 +352,27 @@ const PROGRAM = [
 ];
 
 // ─── Storage / State ──────────────────────────────────────────────
-const LS_KEY = "internat_prep_r3";
+const LS_KEY = "internat_prep_r4";
 function loadState() {
   try {
     const s = JSON.parse(localStorage.getItem(LS_KEY)||"{}");
-    return { subjects:s.subjects||[], extraCards:s.extraCards||[], programProgress:s.programProgress||{}, notes:s.notes||[], annales:s.annales||[], activity:s.activity||[], streak:s.streak||{count:0,lastDate:null}, objectives:s.objectives||{}, friends:s.friends||[], userName:s.userName||"", lastRoom:s.lastRoom||null };
-  } catch { return { subjects:[],extraCards:[],programProgress:{},notes:[],annales:[],activity:[],streak:{count:0,lastDate:null},objectives:{},friends:[],userName:"",lastRoom:null }; }
+    return { subjects:s.subjects||[], extraCards:s.extraCards||[], programProgress:s.programProgress||{}, notes:s.notes||[], annales:s.annales||[], activity:s.activity||[], streak:s.streak||{count:0,lastDate:null}, objectives:s.objectives||{}, friends:s.friends||[], userName:s.userName||"", lastRoom:s.lastRoom||null, cardReviews:s.cardReviews||{}, pomodoroSessions:s.pomodoroSessions||[] };
+  } catch { return { subjects:[],extraCards:[],programProgress:{},notes:[],annales:[],activity:[],streak:{count:0,lastDate:null},objectives:{},friends:[],userName:"",lastRoom:null,cardReviews:{},pomodoroSessions:[] }; }
+}
+
+// ─── ALGORITHME RÉPÉTITION ESPACÉE (SM-2 simplifié) ──────────────
+function getNextReview(prev, correct) {
+  const now = Date.now();
+  if (!prev) return { interval: correct ? 1 : 0, ease: 2.5, due: now + (correct ? 86400000 : 600000), reps: correct ? 1 : 0 };
+  let { interval, ease, reps } = prev;
+  if (correct) {
+    reps = (reps||0) + 1;
+    interval = reps === 1 ? 1 : reps === 2 ? 3 : Math.round(interval * ease);
+    ease = Math.max(1.3, ease + 0.1);
+  } else {
+    reps = 0; interval = 0; ease = Math.max(1.3, ease - 0.2);
+  }
+  return { interval, ease, reps, due: now + interval * 86400000 };
 }
 
 // ─── SUPABASE ─────────────────────────────────────────────────────
@@ -515,7 +530,7 @@ function Programme({st,setSt}){
 
 // ─── FLASHCARDS ───────────────────────────────────────────────────
 function Flashcards({st,setSt}){
-  const [filter,setFilter]=useState("all");
+  const [filter,setFilter]=useState("due");
   const [idx,setIdx]=useState(0);
   const [flipped,setFlipped]=useState(false);
   const [score,setScore]=useState({ok:0,ko:0});
@@ -524,14 +539,29 @@ function Flashcards({st,setSt}){
   const [showUnits,setShowUnits]=useState(true);
 
   const allCards=[...CNG_CARDS,...(st.extraCards||[])];
-  const filtered=filter==="all"?allCards:allCards.filter(c=>c.cat===filter);
-  const card=filtered[idx];
+  const reviews=st.cardReviews||{};
   const cats=[...new Set(allCards.map(c=>c.cat))];
+
+  const dueCards=allCards.filter(c=>!reviews[c.id]||reviews[c.id].due<=Date.now());
+  const filtered=filter==="due"?dueCards:filter==="all"?allCards:allCards.filter(c=>c.cat===filter);
+  const card=filtered[Math.min(idx,filtered.length-1)];
 
   const setF=(f)=>{setFilter(f);setIdx(0);setFlipped(false);setScore({ok:0,ko:0});};
   const next=()=>{setIdx(i=>Math.min(i+1,filtered.length-1));setFlipped(false);};
   const prev=()=>{setIdx(i=>Math.max(i-1,0));setFlipped(false);};
-  const mark=(ok)=>{setScore(s=>ok?{...s,ok:s.ok+1}:{...s,ko:s.ko+1});next();};
+
+  const mark=(ok)=>{
+    if(!card)return;
+    setScore(s=>ok?{...s,ok:s.ok+1}:{...s,ko:s.ko+1});
+    setSt(prev=>{
+      const cardReviews={...prev.cardReviews,[card.id]:getNextReview(prev.cardReviews?.[card.id],ok)};
+      const next={...prev,cardReviews};localStorage.setItem(LS_KEY,JSON.stringify(next));return next;
+    });
+    if(filter==="due"){
+      // enlève la carte courante si elle vient d'être vue
+      setTimeout(()=>{setIdx(i=>Math.max(0,Math.min(i,filtered.length-2)));setFlipped(false);},300);
+    } else next();
+  };
 
   const addCard=()=>{
     if(!form.q.trim()||!form.a.trim())return;
@@ -539,24 +569,35 @@ function Flashcards({st,setSt}){
     setForm({cat:"",q:"",a:"",u:""});setShowAdd(false);
   };
 
+  const mastered=allCards.filter(c=>reviews[c.id]&&reviews[c.id].reps>=5).length;
+
   return(<div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:14}}>
-      <div><div style={S.ttl}>Flashcards CNG</div><div style={S.sub}>{allCards.length} valeurs officielles — 2 systèmes d'unités</div></div>
+      <div><div style={S.ttl}>Flashcards CNG</div><div style={S.sub}>{allCards.length} valeurs · {dueCards.length} à réviser · {mastered} maîtrisées</div></div>
       <div style={{display:"flex",gap:7,alignItems:"center"}}>
         <button style={S.btn(showUnits?"success":"ghost","sm")} onClick={()=>setShowUnits(u=>!u)}>Unités {showUnits?"✓":"○"}</button>
         <button style={S.btn("primary","sm")} onClick={()=>setShowAdd(true)}>+ Carte</button>
       </div>
     </div>
     <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:18}}>
+      <button style={S.btn(filter==="due"?"primary":"ghost","sm")} onClick={()=>setF("due")}>🔁 À réviser ({dueCards.length})</button>
       <button style={S.btn(filter==="all"?"primary":"ghost","sm")} onClick={()=>setF("all")}>Tout ({allCards.length})</button>
       {cats.map(c=><button key={c} style={S.btn(filter===c?"primary":"ghost","sm")} onClick={()=>setF(c)}>{c} ({allCards.filter(x=>x.cat===c).length})</button>)}
     </div>
-    {filtered.length===0?<div style={{textAlign:"center",padding:40,color:C.text2}}>Aucune carte</div>
+    {filtered.length===0
+      ?<div style={{textAlign:"center",padding:"50px 20px",color:C.text2}}>
+          <div style={{fontSize:"3rem",marginBottom:12}}>🎉</div>
+          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:"1.1rem",marginBottom:6}}>Toutes les cartes sont à jour !</div>
+          <div style={{fontSize:"0.8rem"}}>Reviens demain pour la prochaine session.</div>
+        </div>
       :<div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:18}}>
         <div onClick={()=>setFlipped(f=>!f)} style={{width:"100%",maxWidth:500,height:230,perspective:1000,cursor:"pointer"}}>
           <div style={{width:"100%",height:"100%",position:"relative",transformStyle:"preserve-3d",transition:"transform 0.45s cubic-bezier(0.4,0,0.2,1)",transform:flipped?"rotateY(180deg)":"rotateY(0)"}}>
             <div style={{position:"absolute",inset:0,backfaceVisibility:"hidden",borderRadius:18,background:`linear-gradient(135deg,${C.surface2},#1e1e30)`,border:`1px solid ${C.accent}55`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"24px 20px",textAlign:"center",gap:10}}>
-              <div style={{fontSize:"0.66rem",...S.mono,color:C.accent,textTransform:"uppercase",letterSpacing:1.5,background:`${C.accent}18`,padding:"3px 12px",borderRadius:50}}>{card?.cat}</div>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <div style={{fontSize:"0.66rem",...S.mono,color:C.accent,textTransform:"uppercase",letterSpacing:1.5,background:`${C.accent}18`,padding:"3px 12px",borderRadius:50}}>{card?.cat}</div>
+                {reviews[card?.id]&&<div style={{fontSize:"0.62rem",color:C.text2,...S.mono}}>×{reviews[card?.id]?.reps||0}</div>}
+              </div>
               <div style={{fontFamily:"'Syne',sans-serif",fontSize:"1.1rem",fontWeight:700,lineHeight:1.4}}>{card?.q}</div>
               <div style={{fontSize:"0.7rem",color:C.text2}}>Clique pour révéler →</div>
             </div>
@@ -569,11 +610,14 @@ function Flashcards({st,setSt}){
         </div>
         <div style={{display:"flex",alignItems:"center",gap:14}}>
           <button onClick={prev} style={{width:36,height:36,borderRadius:"50%",border:`1px solid ${C.border}`,background:C.surface,color:C.text,cursor:"pointer",fontSize:"0.9rem"}}>←</button>
-          <span style={{...S.mono,fontSize:"0.78rem",color:C.text2,minWidth:55,textAlign:"center"}}>{idx+1}/{filtered.length}</span>
+          <span style={{...S.mono,fontSize:"0.78rem",color:C.text2,minWidth:55,textAlign:"center"}}>{Math.min(idx+1,filtered.length)}/{filtered.length}</span>
           <button onClick={next} style={{width:36,height:36,borderRadius:"50%",border:`1px solid ${C.border}`,background:C.surface,color:C.text,cursor:"pointer",fontSize:"0.9rem"}}>→</button>
         </div>
-        {flipped&&<div style={{display:"flex",gap:10}}><button onClick={()=>mark(false)} style={S.btn("danger")}>✗ Raté</button><button onClick={()=>mark(true)} style={S.btn("success")}>✓ Connu</button></div>}
-        {(score.ok+score.ko)>0&&<div style={{...S.mono,fontSize:"0.76rem",color:C.text2}}><span style={{color:C.accent3}}>{score.ok}</span> connus · <span style={{color:C.accent2}}>{score.ko}</span> à retravailler</div>}
+        {flipped&&<div style={{display:"flex",gap:10}}>
+          <button onClick={()=>mark(false)} style={S.btn("danger")}>✗ Raté</button>
+          <button onClick={()=>mark(true)} style={S.btn("success")}>✓ Connu</button>
+        </div>}
+        {(score.ok+score.ko)>0&&<div style={{...S.mono,fontSize:"0.76rem",color:C.text2}}><span style={{color:C.accent3}}>{score.ok}</span> connus · <span style={{color:C.accent2}}>{score.ko}</span> à retravailler · algorithme SR actif</div>}
       </div>
     }
     <Modal open={showAdd} onClose={()=>setShowAdd(false)} title="Nouvelle flashcard personnalisée">
@@ -758,6 +802,193 @@ function Motivation({st,setSt}){
   </div>);
 }
 
+// ─── POMODORO ─────────────────────────────────────────────────────
+function Pomodoro({st,setSt}){
+  const MODES=[{label:"Focus",min:25,color:C.accent},{label:"Pause courte",min:5,color:C.accent3},{label:"Pause longue",min:15,color:"#38b6f8"}];
+  const [mode,setMode]=useState(0);
+  const [seconds,setSeconds]=useState(MODES[0].min*60);
+  const [running,setRunning]=useState(false);
+  const [sessions,setSessions]=useState(0);
+  const intervalRef=useRef(null);
+  const audioRef=useRef(null);
+
+  const cur=MODES[mode];
+  const pct=Math.round((1-seconds/(cur.min*60))*100);
+  const fmt=(s)=>`${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
+
+  const reset=(m)=>{clearInterval(intervalRef.current);setRunning(false);setMode(m);setSeconds(MODES[m].min*60);};
+  const toggle=()=>{
+    if(running){clearInterval(intervalRef.current);setRunning(false);}
+    else{
+      setRunning(true);
+      intervalRef.current=setInterval(()=>{
+        setSeconds(s=>{
+          if(s<=1){
+            clearInterval(intervalRef.current);setRunning(false);
+            try{const a=new Audio("data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAA...");a.play();}catch{}
+            if(mode===0){
+              setSessions(n=>n+1);
+              setSt(prev=>{const ps=[...( prev.pomodoroSessions||[]),{date:todayStr(),id:uid()}];const next={...prev,pomodoroSessions:ps};localStorage.setItem(LS_KEY,JSON.stringify(next));return next;});
+            }
+            const next=(mode===0&&sessions%3===2)?2:mode===0?1:0;
+            setTimeout(()=>reset(next),500);
+            return 0;
+          }
+          return s-1;
+        });
+      },1000);
+    }
+  };
+  useEffect(()=>()=>clearInterval(intervalRef.current),[]);
+
+  const todaySessions=(st.pomodoroSessions||[]).filter(s=>s.date===todayStr()).length;
+  const weekSessions=(st.pomodoroSessions||[]).filter(s=>{const d=new Date(s.date.split("/").reverse().join("-"));const now=new Date();const diff=(now-d)/86400000;return diff<7;}).length;
+
+  const radius=80,circ=2*Math.PI*radius;
+
+  return(<div>
+    <div style={S.ttl}>Pomodoro</div><div style={S.sub}>Technique de concentration 25/5 min</div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+      <div style={S.card({display:"flex",flexDirection:"column",alignItems:"center",padding:32})}>
+        {/* Mode selector */}
+        <div style={{display:"flex",gap:6,marginBottom:28,background:C.surface2,padding:4,borderRadius:50}}>
+          {MODES.map((m,i)=><button key={i} onClick={()=>reset(i)} style={{background:mode===i?m.color:"none",border:"none",color:mode===i?"#000":C.text2,fontFamily:"'DM Sans',sans-serif",fontSize:"0.73rem",fontWeight:600,padding:"4px 12px",borderRadius:50,cursor:"pointer"}}>{m.label}</button>)}
+        </div>
+        {/* Circle timer */}
+        <div style={{position:"relative",width:200,height:200,marginBottom:24}}>
+          <svg width="200" height="200" style={{transform:"rotate(-90deg)"}}>
+            <circle cx="100" cy="100" r={radius} fill="none" stroke={C.surface2} strokeWidth="8"/>
+            <circle cx="100" cy="100" r={radius} fill="none" stroke={cur.color} strokeWidth="8" strokeDasharray={circ} strokeDashoffset={circ*(1-pct/100)} strokeLinecap="round" style={{transition:"stroke-dashoffset 0.5s"}}/>
+          </svg>
+          <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:"2.8rem",fontWeight:700,color:cur.color,lineHeight:1}}>{fmt(seconds)}</div>
+            <div style={{fontSize:"0.72rem",color:C.text2,marginTop:4}}>{cur.label}</div>
+          </div>
+        </div>
+        {/* Controls */}
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={()=>reset(mode)} style={{width:40,height:40,borderRadius:"50%",border:`1px solid ${C.border}`,background:C.surface2,color:C.text2,cursor:"pointer",fontSize:"0.9rem"}}>↺</button>
+          <button onClick={toggle} style={{width:100,height:40,borderRadius:50,background:running?C.accent2:cur.color,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:"0.9rem",fontFamily:"'DM Sans',sans-serif"}}>
+            {running?"⏸ Pause":"▶ Start"}
+          </button>
+        </div>
+        <div style={{marginTop:20,display:"flex",gap:6,flexWrap:"wrap",justifyContent:"center"}}>
+          {Array.from({length:Math.max(sessions,4)}).map((_,i)=><div key={i} style={{width:12,height:12,borderRadius:"50%",background:i<sessions?C.accent4:C.surface2}}/>)}
+        </div>
+        <div style={{fontSize:"0.72rem",color:C.text2,marginTop:8}}>Session {sessions+1} · toutes les 4 sessions = pause longue</div>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:14}}>
+        <div style={S.card()}>
+          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:"0.88rem",marginBottom:14}}>📈 Mes sessions</div>
+          {[["Aujourd'hui",todaySessions+" sessions",C.accent4],["Cette semaine",weekSessions+" sessions",C.accent3],["Total",(st.pomodoroSessions||[]).length+" sessions",C.accent],["Temps focus aujourd'hui",todaySessions*25+" min",C.accent2]].map(([l,v,c],i)=>(
+            <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${C.border}22`,fontSize:"0.82rem"}}><span style={{color:C.text2}}>{l}</span><span style={{fontFamily:"'DM Mono',monospace",color:c,fontWeight:600}}>{v}</span></div>
+          ))}
+        </div>
+        <div style={S.card()}>
+          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:"0.88rem",marginBottom:12}}>💡 Méthode Pomodoro</div>
+          {["25 min de travail intense, sans distraction","5 min de pause active (pas le téléphone 😉)","Toutes les 4 sessions → pause longue 15 min","Idéal : 8-12 sessions par jour de révision"].map((t,i)=>(
+            <div key={i} style={{display:"flex",gap:9,padding:"5px 0",fontSize:"0.79rem",color:C.text2}}><span style={{color:cur.color,flexShrink:0}}>→</span>{t}</div>
+          ))}
+        </div>
+      </div>
+    </div>
+  </div>);
+}
+
+// ─── STATISTIQUES ─────────────────────────────────────────────────
+function Stats({st}){
+  const allCards=[...CNG_CARDS,...(st.extraCards||[])];
+  const reviews=st.cardReviews||{};
+  const totalProg=PROGRAM.reduce((a,sec)=>{if(sec.items)return a+sec.items.length;return a+(sec.subsections||[]).reduce((b,sub)=>b+sub.items.length,0);},0);
+  const doneProg=Object.values(st.programProgress||{}).filter(Boolean).length;
+  const total=st.subjects.reduce((a,s)=>a+s.chapters.length,0);
+  const studied=st.subjects.reduce((a,s)=>a+s.chapters.filter(c=>c.count>0).length,0);
+  const sessions=st.annales.flatMap(a=>a.sessions.filter(s=>s.score));
+  const avgScore=sessions.length?Math.round(sessions.reduce((a,s)=>a+Number(s.score),0)/sessions.length):null;
+  const pomToday=(st.pomodoroSessions||[]).filter(s=>s.date===todayStr()).length;
+
+  // Progression par section CNG
+  const secStats=PROGRAM.map(sec=>{
+    const items=sec.items?sec.items:(sec.subsections||[]).flatMap(sub=>sub.items);
+    const done=items.filter(item=>{const key=sec.items?`${PROGRAM.indexOf(sec)}_${item}`:`${PROGRAM.indexOf(sec)}_${(sec.subsections||[]).findIndex(sub=>sub.items.includes(item))}_${item}`;return st.programProgress?.[key];}).length;
+    return{name:sec.section.split("—")[1]?.trim()||sec.section,done,total:items.length,color:sec.color,pct:items.length?Math.round(done/items.length*100):0};
+  });
+
+  // Cartes SR stats
+  const dueNow=allCards.filter(c=>!reviews[c.id]||reviews[c.id].due<=Date.now()).length;
+  const mastered=allCards.filter(c=>reviews[c.id]&&reviews[c.id].reps>=5).length;
+
+  return(<div>
+    <div style={S.ttl}>Statistiques</div><div style={S.sub}>Vue détaillée de ta progression</div>
+
+    {/* KPIs */}
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:20}}>
+      {[
+        {val:`${Math.round(studied/Math.max(total,1)*100)}%`,label:"Cours avancés",color:C.accent3,sub:`${studied}/${total} chapitres`},
+        {val:`${Math.round(doneProg/totalProg*100)}%`,label:"Programme CNG",color:"#38b6f8",sub:`${doneProg}/${totalProg} notions`},
+        {val:avgScore!==null?avgScore+"%":"—",label:"Moy. annales",color:C.accent4,sub:`${sessions.length} sessions`},
+        {val:dueNow,label:"Flashcards dues",color:C.accent2,sub:`${mastered} maîtrisées`},
+        {val:pomToday,label:"Pomodoros aujourd'hui",color:C.accent,sub:`${pomToday*25} min focus`},
+        {val:(st.streak?.count||0)+"🔥",label:"Streak actuel",color:C.accent4,sub:"jours consécutifs"},
+      ].map((k,i)=><div key={i} style={S.card()}>
+        <div style={{fontFamily:"'Syne',sans-serif",fontSize:"1.6rem",fontWeight:800,color:k.color,lineHeight:1}}>{k.val}</div>
+        <div style={{fontSize:"0.73rem",color:C.text,marginTop:3,fontWeight:500}}>{k.label}</div>
+        <div style={{fontSize:"0.66rem",color:C.text2,marginTop:1}}>{k.sub}</div>
+      </div>)}
+    </div>
+
+    {/* Progression par section CNG */}
+    <div style={S.card({marginBottom:14})}>
+      <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:"0.88rem",marginBottom:16}}>📋 Progression par section CNG</div>
+      {secStats.map((s,i)=><div key={i} style={{marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+          <div style={{fontSize:"0.78rem",color:C.text,flex:1,paddingRight:10}}>{s.name}</div>
+          <div style={{display:"flex",gap:10,alignItems:"center",flexShrink:0}}>
+            <span style={{fontSize:"0.7rem",color:C.text2,fontFamily:"'DM Mono',monospace"}}>{s.done}/{s.total}</span>
+            <span style={{fontSize:"0.72rem",fontWeight:700,color:s.color,fontFamily:"'DM Mono',monospace",minWidth:32,textAlign:"right"}}>{s.pct}%</span>
+          </div>
+        </div>
+        <div style={{height:6,background:C.surface2,borderRadius:50,overflow:"hidden"}}>
+          <div style={{height:"100%",width:`${s.pct}%`,background:s.color,borderRadius:50,transition:"width 0.5s"}}/>
+        </div>
+      </div>)}
+    </div>
+
+    {/* Scores annales */}
+    {sessions.length>0&&<div style={S.card({marginBottom:14})}>
+      <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:"0.88rem",marginBottom:14}}>📚 Historique scores annales</div>
+      <div style={{display:"flex",gap:4,alignItems:"flex-end",height:80}}>
+        {sessions.slice(-20).map((s,i)=>{const pct=Number(s.score);const col=pct>=70?C.accent3:pct>=50?C.accent4:C.accent2;return(
+          <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+            <div style={{fontSize:"0.55rem",color:col,fontFamily:"'DM Mono',monospace"}}>{pct}%</div>
+            <div style={{width:"100%",background:col,borderRadius:"3px 3px 0 0",height:`${Math.max(pct*0.6,4)}px`,transition:"height 0.3s"}}/>
+          </div>
+        );})}
+      </div>
+      <div style={{fontSize:"0.66rem",color:C.text2,marginTop:8,textAlign:"center"}}>
+        {sessions.length} sessions · Moy. <span style={{color:C.accent3}}>{avgScore}%</span> · 
+        Meilleur <span style={{color:C.accent3}}>{Math.max(...sessions.map(s=>Number(s.score)))}%</span>
+      </div>
+    </div>}
+
+    {/* Matières détail */}
+    {st.subjects.length>0&&<div style={S.card()}>
+      <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:"0.88rem",marginBottom:14}}>📅 Détail par matière</div>
+      {st.subjects.map(subj=>{const t=subj.chapters.length,v=subj.chapters.filter(c=>c.count>0).length,pct=t?Math.round(v/t*100):0,passages=subj.chapters.reduce((a,c)=>a+c.count,0);
+        return(<div key={subj.id} style={{marginBottom:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:5,alignItems:"center"}}>
+            <div style={{display:"flex",alignItems:"center",gap:7}}><div style={{width:8,height:8,borderRadius:"50%",background:subj.color}}/><span style={{fontSize:"0.81rem",fontWeight:500}}>{subj.name}</span></div>
+            <div style={{display:"flex",gap:12,fontSize:"0.7rem",color:C.text2,fontFamily:"'DM Mono',monospace"}}>
+              <span>{v}/{t} ch.</span><span>{passages} passages</span><span style={{color:subj.color}}>{pct}%</span>
+            </div>
+          </div>
+          <div style={{height:4,background:C.surface2,borderRadius:50,overflow:"hidden"}}><div style={{height:"100%",width:`${pct}%`,background:subj.color,borderRadius:50}}/></div>
+        </div>);
+      })}
+    </div>}
+  </div>);
+}
+
 // ─── SOCIAL ───────────────────────────────────────────────────────
 function Social({st,setSt}){
   const [currentRoom,setCurrentRoom]=useState(st.lastRoom||null);
@@ -900,6 +1131,8 @@ const TABS=[
   {id:"flashcards",label:"🃏 Flashcards"},
   {id:"notes",label:"📝 Notes"},
   {id:"annales",label:"📚 Annales"},
+  {id:"stats",label:"📊 Stats"},
+  {id:"pomodoro",label:"⏱️ Pomodoro"},
   {id:"motivation",label:"🔥 Motivation"},
   {id:"social",label:"👥 Social"},
 ];
@@ -928,6 +1161,8 @@ export default function App(){
       {tab==="flashcards" &&<Flashcards st={st} setSt={setSt}/>}
       {tab==="notes"      &&<Notes st={st} setSt={setSt}/>}
       {tab==="annales"    &&<Annales st={st} setSt={setSt}/>}
+      {tab==="stats"      &&<Stats st={st}/>}
+      {tab==="pomodoro"   &&<Pomodoro st={st} setSt={setSt}/>}
       {tab==="motivation" &&<Motivation st={st} setSt={setSt}/>}
       {tab==="social"     &&<Social st={st} setSt={setSt}/>}
     </main>
