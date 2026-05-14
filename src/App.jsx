@@ -200,6 +200,28 @@ const PROGRAM = [
       "Infections de l'immunodéprimé",
       "Sensibilité et résistance aux agents anti-infectieux",
       "Mécanismes de résistance aux agents anti-infectieux",
+      "Bactérie — Neisseria gonorrhoeae & N. meningitidis",
+      "Bactérie — Staphylococcus aureus",
+      "Bactérie — Streptococcus pyogenes & S. agalactiae & S. pneumoniae",
+      "Bactérie — Escherichia coli",
+      "Bactérie — Salmonella spp. & Shigella spp.",
+      "Bactérie — Campylobacter jejuni & Helicobacter pylori",
+      "Bactérie — Pseudomonas aeruginosa",
+      "Bactérie — Haemophilus influenzae",
+      "Bactérie — Clostridium difficile & Listeria monocytogenes",
+      "Bactérie — Mycobacterium tuberculosis",
+      "Bactérie — Treponema pallidum",
+      "Bactérie — Chlamydia trachomatis",
+      "Bactérie — Legionella pneumophila",
+      "Virus — Herpes simplex virus (HSV)",
+      "Virus — Cytomégalovirus (CMV)",
+      "Virus — Entérovirus",
+      "Virus — Rotavirus",
+      "Virus — Papillomavirus (HPV)",
+      "Virus — Virus de la grippe (Influenza)",
+      "Virus — Virus de la rubéole",
+      "Virus — VHA, VHB, VHC (hépatites virales)",
+      "Virus — VIH",
     ]},
     { title:"Parasitoses et mycoses", items:[
       "Protozooses intestinales : amibiase, giardiose",
@@ -338,9 +360,32 @@ function loadState() {
   } catch { return { subjects:[],extraCards:[],programProgress:{},notes:[],annales:[],activity:[],streak:{count:0,lastDate:null},objectives:{},friends:[],userName:"",lastRoom:null }; }
 }
 
-const sharedStorage = {
-  async get(k){if(window.storage){try{const r=await window.storage.get(k,true);return r?r.value:null;}catch{return null;}}return localStorage.getItem("sh_"+k);},
-  async set(k,v){if(window.storage){try{await window.storage.set(k,v,true);return;}catch{}}localStorage.setItem("sh_"+k,v);}
+// ─── SUPABASE ─────────────────────────────────────────────────────
+const SUPABASE_URL = "https://bdeqqvvlbqqbfopdrlet.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJkZXFxdnZsYnFxYmZvcGRybGV0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3NzAxMjksImV4cCI6MjA5NDM0NjEyOX0.SgRcM_ZjcHOVQgiN3p5QswgsKHXOUWPGE_qfRh5D_T8";
+
+const sb = {
+  async query(table, filters={}) {
+    let url = `${SUPABASE_URL}/rest/v1/${table}?`;
+    Object.entries(filters).forEach(([k,v]) => url += `${k}=eq.${v}&`);
+    url += "order=created_at.asc";
+    const r = await fetch(url, { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } });
+    return r.json();
+  },
+  async insert(table, data) {
+    await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+      method: "POST",
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+      body: JSON.stringify(data)
+    });
+  },
+  async upsert(table, data) {
+    await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+      method: "POST",
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify(data)
+    });
+  }
 };
 
 const QUOTES=[
@@ -727,12 +772,38 @@ function Social({st,setSt}){
   const copyProg=()=>{const code=btoa(JSON.stringify(pd()));navigator.clipboard.writeText(code).catch(()=>{});alert("Code copié !");};
   const addFriend=()=>{if(!friendCode.trim())return;try{const d=JSON.parse(atob(friendCode.trim()));setSt(prev=>{const friends=[...(prev.friends||[]).filter(f=>f.name!==d.name),{...d,id:uid()}];const next={...prev,friends};localStorage.setItem(LS_KEY,JSON.stringify(next));return next;});setFriendCode("");}catch{alert("Code invalide.");}};
   const remFriend=(id)=>setSt(prev=>{const next={...prev,friends:(prev.friends||[]).filter(f=>f.id!==id)};localStorage.setItem(LS_KEY,JSON.stringify(next));return next;});
-  const loadMsgs=async(code)=>{const r=await sharedStorage.get("rm_"+code);if(r)setMessages(JSON.parse(r));};
-  const enterRoom=async(code,name)=>{const room={code,name};setCurrentRoom(room);setSt(prev=>{const next={...prev,lastRoom:room};localStorage.setItem(LS_KEY,JSON.stringify(next));return next;});loadMsgs(code);if(pollRef.current)clearInterval(pollRef.current);pollRef.current=setInterval(()=>loadMsgs(code),4000);};
+
+  const loadMsgs=async(code)=>{
+    try{const data=await sb.query("messages",{room_id:code});setMessages(data||[]);}catch(e){console.error(e);}
+  };
+  const enterRoom=async(code,name)=>{
+    const room={code,name};setCurrentRoom(room);
+    setSt(prev=>{const next={...prev,lastRoom:room};localStorage.setItem(LS_KEY,JSON.stringify(next));return next;});
+    loadMsgs(code);
+    if(pollRef.current)clearInterval(pollRef.current);
+    pollRef.current=setInterval(()=>loadMsgs(code),4000);
+  };
   const leaveRoom=()=>{if(pollRef.current)clearInterval(pollRef.current);setCurrentRoom(null);setMessages([]);setSt(prev=>{const next={...prev,lastRoom:null};localStorage.setItem(LS_KEY,JSON.stringify(next));return next;});};
-  const createRoom=async()=>{if(!roomName.trim())return;const code=genCode();await sharedStorage.set("rm_meta_"+code,JSON.stringify({code,name:roomName.trim(),creator:uname}));await sharedStorage.set("rm_"+code,JSON.stringify([]));enterRoom(code,roomName.trim());setRoomName("");};
-  const joinRoom=async()=>{const code=joinCode.trim().toUpperCase();if(code.length<4)return;const meta=await sharedStorage.get("rm_meta_"+code);if(!meta){setJoinErr("Room introuvable.");return;}const room=JSON.parse(meta);enterRoom(code,room.name);setJoinCode("");setJoinErr("");};
-  const sendMsg=async()=>{if(!msgInput.trim()||!currentRoom)return;const msg={id:uid(),author:uname,text:msgInput.trim(),time:new Date().toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}),date:todayStr()};const newMsgs=[...messages,msg].slice(-100);setMessages(newMsgs);setMsgInput("");await sharedStorage.set("rm_"+currentRoom.code,JSON.stringify(newMsgs));};
+  const createRoom=async()=>{
+    if(!roomName.trim())return;
+    const code=genCode();
+    await sb.upsert("rooms",{id:code,name:roomName.trim(),creator:uname});
+    enterRoom(code,roomName.trim());setRoomName("");
+  };
+  const joinRoom=async()=>{
+    const code=joinCode.trim().toUpperCase();if(code.length<4)return;
+    try{
+      const data=await sb.query("rooms",{id:code});
+      if(!data||data.length===0){setJoinErr("Room introuvable.");return;}
+      enterRoom(code,data[0].name);setJoinCode("");setJoinErr("");
+    }catch{setJoinErr("Erreur de connexion.");}
+  };
+  const sendMsg=async()=>{
+    if(!msgInput.trim()||!currentRoom)return;
+    const msg={id:uid(),room_id:currentRoom.code,author:uname,text:msgInput.trim(),time:new Date().toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}),date:todayStr()};
+    setMessages(prev=>[...prev,msg]);setMsgInput("");
+    await sb.insert("messages",msg);
+  };
   useEffect(()=>{messagesEnd.current?.scrollIntoView({behavior:"smooth"});},[messages]);
   useEffect(()=>{if(currentRoom){loadMsgs(currentRoom.code);if(pollRef.current)clearInterval(pollRef.current);pollRef.current=setInterval(()=>loadMsgs(currentRoom.code),4000);}return()=>{if(pollRef.current)clearInterval(pollRef.current);};},[]);
   if(!uname)return(<div style={{maxWidth:380,margin:"70px auto",textAlign:"center"}}>
