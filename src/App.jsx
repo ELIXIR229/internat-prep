@@ -1123,6 +1123,197 @@ function Social({st,setSt}){
   </div>);
 }
 
+// ─── MULTI-ROOM SOCIAL ────────────────────────────────────────────
+function MultiRoomSocial({st,setSt}){
+  const [rooms,setRooms]=useState(()=>{try{return JSON.parse(localStorage.getItem("internat_rooms")||"[]");}catch{return [];}});
+  const [activeRoom,setActiveRoom]=useState(null);
+  const [msgsByRoom,setMsgsByRoom]=useState({});
+  const [inputs,setInputs]=useState({});
+  const [uploading,setUploading]=useState(false);
+  const [showJoin,setShowJoin]=useState(false);
+  const [showCreate,setShowCreate]=useState(false);
+  const [newRoomName,setNewRoomName]=useState("");
+  const [joinCode,setJoinCode]=useState("");
+  const [joinErr,setJoinErr]=useState("");
+  const [nameInput,setNameInput]=useState("");
+  const pollRefs=useRef({});
+  const fileRefs=useRef({});
+  const messagesEnd=useRef(null);
+  const uname=st.userName||"";
+
+  const saveRooms=(r)=>{setRooms(r);localStorage.setItem("internat_rooms",JSON.stringify(r));};
+  const saveName=()=>{if(!nameInput.trim())return;setSt(prev=>{const next={...prev,userName:nameInput.trim()};localStorage.setItem(LS_KEY,JSON.stringify(next));return next;});};
+  const genCode=()=>{const c="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";let s="";for(let i=0;i<6;i++)s+=c[Math.floor(Math.random()*c.length)];return s;};
+  const pd=()=>{const t=st.subjects.reduce((a,s)=>a+s.chapters.length,0),v=st.subjects.reduce((a,s)=>a+s.chapters.filter(c=>c.count>0).length,0);return{name:uname,subjects:st.subjects.length,chapters:`${v}/${t}`,streak:st.streak?.count||0,pct:t?Math.round(v/t*100):0,date:todayStr()};};
+  const copyProg=()=>{const code=btoa(JSON.stringify(pd()));navigator.clipboard.writeText(code).catch(()=>{});alert("Code copié !");};
+
+  const loadMsgs=async(code)=>{
+    try{const data=await sb.query("messages",{room_id:code});setMsgsByRoom(prev=>({...prev,[code]:data||[]}));}catch{}
+  };
+
+  const startPoll=(code)=>{
+    if(pollRefs.current[code])return;
+    loadMsgs(code);
+    pollRefs.current[code]=setInterval(()=>loadMsgs(code),4000);
+  };
+  const stopPoll=(code)=>{clearInterval(pollRefs.current[code]);delete pollRefs.current[code];};
+
+  const joinRoomById=async(code,name)=>{
+    const room={code,name};
+    const already=rooms.find(r=>r.code===code);
+    if(!already)saveRooms([...rooms,room]);
+    setActiveRoom(code);
+    startPoll(code);
+  };
+
+  const createRoom=async()=>{
+    if(!newRoomName.trim())return;
+    const code=genCode();
+    await sb.upsert("rooms",{id:code,name:newRoomName.trim(),creator:uname});
+    joinRoomById(code,newRoomName.trim());
+    setNewRoomName("");setShowCreate(false);
+  };
+
+  const joinRoom=async()=>{
+    const code=joinCode.trim().toUpperCase();if(code.length<4)return;
+    try{
+      const data=await sb.query("rooms",{id:code});
+      if(!data||data.length===0){setJoinErr("Room introuvable.");return;}
+      joinRoomById(code,data[0].name);
+      setJoinCode("");setJoinErr("");setShowJoin(false);
+    }catch{setJoinErr("Erreur de connexion.");}
+  };
+
+  const leaveRoom=(code)=>{
+    stopPoll(code);
+    const next=rooms.filter(r=>r.code!==code);
+    saveRooms(next);
+    if(activeRoom===code)setActiveRoom(next.length>0?next[0].code:null);
+  };
+
+  const sendMsg=async(code)=>{
+    const text=(inputs[code]||"").trim();if(!text)return;
+    const msg={id:uid(),room_id:code,author:uname,text,time:new Date().toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}),date:todayStr(),type:"text"};
+    setMsgsByRoom(prev=>({...prev,[code]:[...(prev[code]||[]),msg]}));
+    setInputs(prev=>({...prev,[code]:""}));
+    await sb.insert("messages",msg);
+  };
+
+  const uploadFile=async(e,code)=>{
+    const file=e.target.files[0];if(!file)return;
+    if(file.size>10*1024*1024){alert("Max 10 Mo");return;}
+    setUploading(true);
+    try{
+      const path=`${code}/${uid()}_${file.name}`;
+      const res=await fetch(`${SUPABASE_URL}/storage/v1/object/chat-files/${path}`,{method:"POST",headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`,"Content-Type":file.type},body:file});
+      if(!res.ok)throw new Error("Upload failed");
+      const fileUrl=`${SUPABASE_URL}/storage/v1/object/public/chat-files/${path}`;
+      const isImage=file.type.startsWith("image/");
+      const msg={id:uid(),room_id:code,author:uname,text:fileUrl,file_name:file.name,type:isImage?"image":"file",time:new Date().toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}),date:todayStr()};
+      setMsgsByRoom(prev=>({...prev,[code]:[...(prev[code]||[]),msg]}));
+      await sb.insert("messages",msg);
+    }catch(err){alert("Erreur : "+err.message);}
+    setUploading(false);e.target.value="";
+  };
+
+  useEffect(()=>{messagesEnd.current?.scrollIntoView({behavior:"smooth"});},[msgsByRoom,activeRoom]);
+  useEffect(()=>{rooms.forEach(r=>startPoll(r.code));return()=>Object.keys(pollRefs.current).forEach(stopPoll);},[]);
+
+  if(!uname)return(<div style={{maxWidth:380,margin:"70px auto",textAlign:"center"}}>
+    <div style={{fontSize:"2.5rem",marginBottom:14}}>👋</div>
+    <div style={S.ttl}>Comment tu t'appelles ?</div>
+    <div style={{color:C.text2,fontSize:"0.83rem",margin:"8px 0 18px"}}>Ton prénom sera visible dans les rooms</div>
+    <div style={{display:"flex",gap:7,justifyContent:"center"}}><input style={{...S.inp,maxWidth:190}} value={nameInput} onChange={e=>setNameInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&saveName()} placeholder="Ton prénom..."/><button style={S.btn()} onClick={saveName}>Continuer →</button></div>
+  </div>);
+
+  const curMsgs=activeRoom?(msgsByRoom[activeRoom]||[]):[];
+  const curRoom=rooms.find(r=>r.code===activeRoom);
+
+  return(<div>
+    <div style={S.ttl}>Espace social</div><div style={S.sub}>Rooms privées · partage de fichiers · multi-rooms</div>
+    <div style={{display:"grid",gridTemplateColumns:"220px 1fr",gap:14,minHeight:520}}>
+      {/* Sidebar rooms */}
+      <div style={{display:"flex",flexDirection:"column",gap:6}}>
+        <div style={{display:"flex",gap:5,marginBottom:4}}>
+          <button style={{...S.btn("primary","sm"),flex:1}} onClick={()=>setShowCreate(true)}>+ Créer</button>
+          <button style={{...S.btn("ghost","sm"),flex:1}} onClick={()=>setShowJoin(true)}>Rejoindre</button>
+        </div>
+        {rooms.length===0&&<div style={{color:C.text2,fontSize:"0.78rem",textAlign:"center",padding:"20px 0"}}>Aucune room.<br/>Crée ou rejoins-en une !</div>}
+        {rooms.map(r=>{
+          const unread=(msgsByRoom[r.code]||[]).length;
+          return(<div key={r.code} onClick={()=>{setActiveRoom(r.code);startPoll(r.code);}} style={{padding:"9px 11px",borderRadius:10,cursor:"pointer",border:`1px solid ${activeRoom===r.code?C.accent:C.border}`,background:activeRoom===r.code?`${C.accent}18`:"transparent",display:"flex",alignItems:"center",gap:8}}>
+            <div style={{width:32,height:32,borderRadius:"50%",background:`linear-gradient(135deg,${C.accent},#a78bfa)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"0.82rem",fontWeight:700,flexShrink:0,color:"#fff"}}>{r.name[0].toUpperCase()}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:"0.81rem",fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.name}</div>
+              <div style={{fontSize:"0.62rem",color:C.accent,...S.mono,letterSpacing:2}}>{r.code}</div>
+            </div>
+            <button onClick={e=>{e.stopPropagation();leaveRoom(r.code);}} style={{background:"none",border:"none",color:C.text3,cursor:"pointer",fontSize:"0.7rem",flexShrink:0}}>✕</button>
+          </div>);
+        })}
+        <div style={{marginTop:"auto",paddingTop:10,borderTop:`1px solid ${C.border}`}}>
+          <div style={{fontSize:"0.72rem",color:C.text2,marginBottom:6}}>Progression</div>
+          <button style={{...S.btn("primary","sm"),width:"100%"}} onClick={copyProg}>📋 Copier mon code</button>
+        </div>
+      </div>
+
+      {/* Chat area */}
+      {!activeRoom
+        ?<div style={S.card({display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:10})}>
+          <div style={{fontSize:"3rem",opacity:0.3}}>💬</div>
+          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:"0.95rem"}}>Sélectionne une room</div>
+          <div style={{fontSize:"0.8rem",color:C.text2}}>ou crée-en une nouvelle</div>
+        </div>
+        :<div style={S.card({display:"flex",flexDirection:"column",height:520})}>
+          <div style={{display:"flex",alignItems:"center",gap:9,paddingBottom:10,borderBottom:`1px solid ${C.border}`,marginBottom:10}}>
+            <div style={{width:32,height:32,borderRadius:"50%",background:`linear-gradient(135deg,${C.accent3},#0ea5e9)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"0.95rem"}}>💬</div>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:600,fontSize:"0.86rem"}}>{curRoom?.name}</div>
+              <div style={{fontSize:"0.66rem",color:C.accent3,...S.mono}}>● {activeRoom} · rafraîchit toutes les 4s</div>
+            </div>
+            <button onClick={()=>{navigator.clipboard.writeText(activeRoom).catch(()=>{});alert("Code : "+activeRoom);}} style={{...S.btn("ghost","sm"),fontSize:"0.7rem"}}>📋 Code</button>
+          </div>
+          <div style={{flex:1,overflowY:"auto",display:"flex",flexDirection:"column",gap:7}}>
+            {curMsgs.length===0
+              ?<div style={{textAlign:"center",color:C.text2,padding:"35px 20px",fontSize:"0.8rem"}}>Aucun message encore.<br/>Soyez les premiers à écrire 👋</div>
+              :curMsgs.map(m=>{const isMe=m.author===uname;return(<div key={m.id} style={{maxWidth:"80%",padding:"9px 13px",borderRadius:13,fontSize:"0.81rem",lineHeight:1.5,alignSelf:isMe?"flex-end":"flex-start",background:isMe?`${C.accent}28`:C.surface2,border:`1px solid ${isMe?C.accent+"44":C.border}`,borderBottomRightRadius:isMe?3:13,borderBottomLeftRadius:isMe?13:3}}>
+                <div style={{fontSize:"0.66rem",marginBottom:4,color:isMe?C.accent:C.accent3,...S.mono}}>{isMe?"Toi":m.author} · {m.time}</div>
+                {m.type==="image"
+                  ?<img src={m.text} alt={m.file_name} style={{maxWidth:"100%",maxHeight:220,borderRadius:8,display:"block",cursor:"pointer"}} onClick={()=>window.open(m.text,"_blank")}/>
+                  :m.type==="file"
+                  ?<a href={m.text} target="_blank" rel="noreferrer" style={{display:"flex",alignItems:"center",gap:7,color:C.accent,textDecoration:"none",background:`${C.accent}18`,padding:"7px 10px",borderRadius:8}}>
+                    <span style={{fontSize:"1.1rem"}}>📎</span>
+                    <span style={{fontSize:"0.78rem",fontWeight:500}}>{m.file_name}</span>
+                  </a>
+                  :<span>{m.text}</span>
+                }
+              </div>);})}
+            <div ref={messagesEnd}/>
+          </div>
+          <div style={{display:"flex",gap:7,marginTop:10,paddingTop:10,borderTop:`1px solid ${C.border}`}}>
+            <input ref={el=>fileRefs.current[activeRoom]=el} type="file" accept="image/*,.pdf,.doc,.docx" style={{display:"none"}} onChange={e=>uploadFile(e,activeRoom)}/>
+            <button onClick={()=>fileRefs.current[activeRoom]?.click()} style={{width:40,height:46,borderRadius:9,background:C.surface2,border:`1px solid ${C.border}`,color:uploading?C.accent4:C.text2,cursor:"pointer",fontSize:"1rem",flexShrink:0}}>{uploading?"⏳":"📎"}</button>
+            <textarea value={inputs[activeRoom]||""} onChange={e=>setInputs(p=>({...p,[activeRoom]:e.target.value}))} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMsg(activeRoom);}}} placeholder="Écris un message... (Entrée pour envoyer)" style={{...S.inp,flex:1,resize:"none",height:46,lineHeight:1.5}}/>
+            <button onClick={()=>sendMsg(activeRoom)} style={{width:40,height:46,borderRadius:9,background:C.accent,border:"none",color:"#fff",fontSize:"1rem",cursor:"pointer",flexShrink:0}}>➤</button>
+          </div>
+        </div>
+      }
+    </div>
+
+    {/* Modal créer */}
+    <Modal open={showCreate} onClose={()=>setShowCreate(false)} title="Créer une room">
+      <FG label="Nom de la room"><input style={S.inp} value={newRoomName} onChange={e=>setNewRoomName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&createRoom()} placeholder="ex: Groupe pharma P4"/></FG>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16}}><button style={S.btn("ghost","sm")} onClick={()=>setShowCreate(false)}>Annuler</button><button style={S.btn("primary","sm")} onClick={createRoom}>Créer</button></div>
+    </Modal>
+
+    {/* Modal rejoindre */}
+    <Modal open={showJoin} onClose={()=>setShowJoin(false)} title="Rejoindre une room">
+      <FG label="Code (6 caractères)"><input style={{...S.inp,textTransform:"uppercase",letterSpacing:3,...S.mono,fontSize:"1rem"}} value={joinCode} onChange={e=>setJoinCode(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&joinRoom()} placeholder="EX: KX7P2M"/></FG>
+      {joinErr&&<div style={{color:C.accent2,fontSize:"0.73rem",marginBottom:7}}>{joinErr}</div>}
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16}}><button style={S.btn("ghost","sm")} onClick={()=>setShowJoin(false)}>Annuler</button><button style={S.btn("primary","sm")} onClick={joinRoom}>Rejoindre</button></div>
+    </Modal>
+  </div>);
+}
+
 // ─── APP ROOT ─────────────────────────────────────────────────────
 const TABS=[
   {id:"dashboard",label:"🏠"},
@@ -1164,7 +1355,7 @@ export default function App(){
       {tab==="stats"      &&<Stats st={st}/>}
       {tab==="pomodoro"   &&<Pomodoro st={st} setSt={setSt}/>}
       {tab==="motivation" &&<Motivation st={st} setSt={setSt}/>}
-      {tab==="social"     &&<Social st={st} setSt={setSt}/>}
+      {tab==="social"     &&<MultiRoomSocial st={st} setSt={setSt}/>}
     </main>
   </div>);
 }
