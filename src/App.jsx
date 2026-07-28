@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 
 const C = {
-  bg:"#080810",surface:"#111118",surface2:"#18181f",surface3:"#21212c",
-  border:"#252530",accent:"#7c6dff",accent2:"#ff5f7e",accent3:"#2ecc8a",
-  accent4:"#f0a500",text:"#e2e2ef",text2:"#7777a0",text3:"#444460",
+  bg:"linear-gradient(160deg,#fff6ef 0%,#fdf1ff 45%,#eef8ff 100%)",
+  surface:"#ffffff",surface2:"#fff3e8",surface3:"#ffe8d6",
+  border:"#f0dcc8",accent:"#7c5cff",accent2:"#ff5f8e",accent3:"#0ea968",
+  accent4:"#f5a300",accent5:"#0ea5e9",accent6:"#ec4899",
+  text:"#2b2340",text2:"#7a6f95",text3:"#b9abd1",
 };
 
 const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2);
@@ -353,10 +355,19 @@ const PROGRAM = [
 
 // ─── Storage / State ──────────────────────────────────────────────
 const LS_KEY = "internat_prep_r4";
+// Migre l'ancien format booléen {key:true/false} vers le nouveau format riche {key:{done,count,history}}
+function migrateProgress(pp) {
+  const out = {};
+  Object.entries(pp||{}).forEach(([k,v]) => {
+    if (typeof v === "boolean") out[k] = { done:v, count:v?1:0, history:v?[Date.now()]:[] };
+    else out[k] = { done:!!v?.done, count:v?.count||0, history:v?.history||[] };
+  });
+  return out;
+}
 function loadState() {
   try {
     const s = JSON.parse(localStorage.getItem(LS_KEY)||"{}");
-    return { subjects:s.subjects||[], extraCards:s.extraCards||[], programProgress:s.programProgress||{}, notes:s.notes||[], annales:s.annales||[], activity:s.activity||[], streak:s.streak||{count:0,lastDate:null}, objectives:s.objectives||{}, friends:s.friends||[], userName:s.userName||"", lastRoom:s.lastRoom||null, cardReviews:s.cardReviews||{}, pomodoroSessions:s.pomodoroSessions||[] };
+    return { subjects:s.subjects||[], extraCards:s.extraCards||[], programProgress:migrateProgress(s.programProgress), notes:s.notes||[], annales:s.annales||[], activity:s.activity||[], streak:s.streak||{count:0,lastDate:null}, objectives:s.objectives||{}, friends:s.friends||[], userName:s.userName||"", lastRoom:s.lastRoom||null, cardReviews:s.cardReviews||{}, pomodoroSessions:s.pomodoroSessions||[] };
   } catch { return { subjects:[],extraCards:[],programProgress:{},notes:[],annales:[],activity:[],streak:{count:0,lastDate:null},objectives:{},friends:[],userName:"",lastRoom:null,cardReviews:{},pomodoroSessions:[] }; }
 }
 
@@ -403,6 +414,35 @@ const sb = {
   }
 };
 
+// ─── COMPTE À REBOURS CONCOURS (14 décembre) ─────────────────────
+const CONCOURS_DATE = (() => {
+  const now = new Date();
+  const passedThisYear = now.getMonth() > 11 || (now.getMonth() === 11 && now.getDate() > 14);
+  const year = passedThisYear ? now.getFullYear() + 1 : now.getFullYear();
+  return new Date(year, 11, 14, 8, 0, 0);
+})();
+function useCountdown(target) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 60000); return () => clearInterval(t); }, []);
+  const diff = target.getTime() - now;
+  const days = Math.max(0, Math.floor(diff / 86400000));
+  const hours = Math.max(0, Math.floor((diff % 86400000) / 3600000));
+  return { days, hours, passed: diff <= 0 };
+}
+function CountdownBadge() {
+  const { days, hours, passed } = useCountdown(CONCOURS_DATE);
+  const urgent = days <= 30;
+  return (<div style={{display:"flex",alignItems:"center",gap:8,background:urgent?`linear-gradient(120deg,${C.accent2}22,${C.accent4}22)`:`linear-gradient(120deg,${C.accent}18,${C.accent5}18)`,border:`1px solid ${urgent?C.accent2:C.accent}55`,borderRadius:50,padding:"5px 14px",boxShadow:urgent?`0 0 14px ${C.accent2}33`:"none"}}>
+    <span style={{fontSize:"0.85rem"}}>⏳</span>
+    {passed
+      ? <span style={{...S.mono,fontSize:"0.75rem",color:C.text2}}>Concours passé</span>
+      : <span style={{...S.mono,fontSize:"0.75rem",color:urgent?C.accent2:C.text}}>
+          <b style={{fontFamily:"'Syne',sans-serif",fontSize:"0.95rem",color:urgent?C.accent2:C.accent}}>J-{days}</b> ({hours}h) avant le concours
+        </span>
+    }
+  </div>);
+}
+
 const QUOTES=[
   {text:"Le succès, c'est tomber sept fois et se relever huit.",author:"Proverbe japonais"},
   {text:"La douleur de la discipline est bien moindre que la douleur du regret.",author:"Jim Rohn"},
@@ -418,9 +458,9 @@ const QUOTES=[
 
 // ─── Shared styles ────────────────────────────────────────────────
 const S = {
-  card:(x={})=>({background:C.surface,border:`1px solid ${C.border}`,borderRadius:16,padding:20,...x}),
+  card:(x={})=>({background:C.surface,border:`1px solid ${C.border}`,borderRadius:16,padding:20,boxShadow:"0 3px 16px rgba(140,100,200,0.08)",...x}),
   btn:(v="primary",sz="md")=>{
-    const bg=v==="primary"?C.accent:v==="danger"?"transparent":v==="success"?"rgba(46,204,138,0.12)":"transparent";
+    const bg=v==="primary"?`linear-gradient(120deg,${C.accent},${C.accent6})`:v==="danger"?"transparent":v==="success"?"rgba(46,224,160,0.12)":"transparent";
     const col=v==="primary"?"#fff":v==="danger"?C.accent2:v==="success"?C.accent3:C.text2;
     const bd=v==="danger"?`1px solid ${C.accent2}`:v==="success"?`1px solid ${C.accent3}`:`1px solid ${C.border}`;
     return{background:bg,color:col,border:bd,borderRadius:8,padding:sz==="sm"?"4px 11px":"8px 16px",fontSize:sz==="sm"?"0.73rem":"0.82rem",fontWeight:500,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",transition:"all 0.15s"};
@@ -449,7 +489,7 @@ function Dashboard({st}){
   const studied=st.subjects.reduce((a,s)=>a+s.chapters.filter(c=>c.count>0).length,0);
   const allCards=[...CNG_CARDS,...(st.extraCards||[])];
   const totalProg=PROGRAM.reduce((a,sec)=>{if(sec.items)return a+sec.items.length;return a+(sec.subsections||[]).reduce((b,sub)=>b+sub.items.length,0);},0);
-  const doneProg=Object.values(st.programProgress||{}).filter(Boolean).length;
+  const doneProg=Object.values(st.programProgress||{}).filter(p=>p&&p.done).length;
   const stats=[
     {val:st.subjects.length,label:"Matières",color:C.accent},
     {val:`${studied}/${total}`,label:"Chapitres vus",color:C.accent3},
@@ -460,6 +500,7 @@ function Dashboard({st}){
   ];
   return(<div>
     <div style={S.ttl}>Tableau de bord</div><div style={S.sub}>Vue d'ensemble de ta progression</div>
+    <DashboardCountdownCard/>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(145px,1fr))",gap:12,marginBottom:22}}>
       {stats.map((s,i)=><div key={i} style={S.card()}><div style={{fontFamily:"'Syne',sans-serif",fontSize:"1.7rem",fontWeight:800,color:s.color,lineHeight:1}}>{s.val}</div><div style={{fontSize:"0.73rem",color:C.text2,marginTop:4}}>{s.label}</div></div>)}
     </div>
@@ -470,56 +511,102 @@ function Dashboard({st}){
     </div>
   </div>);
 }
+function DashboardCountdownCard(){
+  const {days,hours,passed}=useCountdown(CONCOURS_DATE);
+  const urgent=days<=30;
+  return(<div style={S.card({marginBottom:16,background:`linear-gradient(120deg,${urgent?C.accent2:C.accent}14,${urgent?C.accent4:C.accent5}14)`,border:`1px solid ${urgent?C.accent2:C.accent}44`,display:"flex",alignItems:"center",gap:18})}>
+    <div style={{fontSize:"2.2rem"}}>⏳</div>
+    <div>
+      {passed
+        ?<div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:"1.3rem"}}>Concours passé</div>
+        :<><div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:"2rem",color:urgent?C.accent2:C.accent,lineHeight:1}}>J-{days}</div>
+          <div style={{fontSize:"0.78rem",color:C.text2,marginTop:2}}>({hours}h) avant le concours CNCI · 14 décembre</div></>
+      }
+    </div>
+  </div>);
+}
 
 // ─── PROGRAMME ────────────────────────────────────────────────────
-function ItemRow({keyId,label,done,color,onToggle}){
-  return(<div onClick={()=>onToggle(keyId)} style={{display:"flex",alignItems:"flex-start",gap:9,padding:"5px 4px",borderRadius:6,cursor:"pointer",marginBottom:1}}>
-    <div style={{width:17,height:17,borderRadius:5,border:`2px solid ${done?color:C.border}`,background:done?color:"none",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:2,transition:"all 0.13s"}}>
+function ItemRow({keyId,label,done,count=0,lastDate,color,onToggleDone,onLogPass,onUnlogPass}){
+  const tier = count===0?0:count<3?1:count<6?2:3;
+  const badgeBg = tier===0?C.surface3:tier===1?`${color}25`:tier===2?`${color}55`:color;
+  const badgeCol = tier===3?"#0a0a12":tier===0?C.text3:color;
+  const badgeGlow = tier===3?`0 0 9px ${color}88`:"none";
+  return(<div style={{display:"flex",alignItems:"flex-start",gap:6,padding:"5px 4px",borderRadius:6,marginBottom:1}}>
+    <div onClick={()=>onToggleDone(keyId)} style={{width:17,height:17,borderRadius:5,border:`2px solid ${done?color:C.border}`,background:done?color:"none",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:2,cursor:"pointer",transition:"all 0.13s"}}>
       {done&&<span style={{fontSize:"0.55rem",color:"#000",fontWeight:800}}>✓</span>}
     </div>
-    <div style={{fontSize:"0.81rem",color:done?C.text2:C.text,textDecoration:done?"line-through":"none",flex:1,lineHeight:1.45}}>{label}</div>
+    <div onClick={()=>onToggleDone(keyId)} style={{fontSize:"0.81rem",color:done?C.text2:C.text,textDecoration:done?"line-through":"none",flex:1,lineHeight:1.45,cursor:"pointer"}}>{label}</div>
+    <div title={lastDate?`Dernier passage : ${lastDate}`:"Jamais révisé"} style={{...S.mono,fontSize:"0.65rem",fontWeight:700,background:badgeBg,color:badgeCol,borderRadius:50,padding:"1px 7px",boxShadow:badgeGlow,minWidth:22,textAlign:"center",flexShrink:0,transition:"all 0.2s"}}>×{count}</div>
+    <button onClick={(e)=>{e.stopPropagation();onUnlogPass(keyId);}} disabled={count===0} title="Retirer un passage (annuler un clic en trop)" style={{width:19,height:19,borderRadius:"50%",border:`1px solid ${count===0?C.border:C.accent2+"77"}`,background:"none",color:count===0?C.text3:C.accent2,cursor:count===0?"default":"pointer",opacity:count===0?0.4:1,fontSize:"0.7rem",lineHeight:1,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",padding:0,marginTop:1}}>−</button>
+    <button onClick={(e)=>{e.stopPropagation();onLogPass(keyId);}} title="Ajouter un passage sur cette notion" style={{width:19,height:19,borderRadius:"50%",border:`1px solid ${color}77`,background:"none",color:color,cursor:"pointer",fontSize:"0.7rem",lineHeight:1,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",padding:0,marginTop:1}}>+</button>
   </div>);
 }
 
 function Programme({st,setSt}){
   const [search,setSearch]=useState("");
   const prog=st.programProgress||{};
-  const toggle=(key)=>setSt(prev=>{const programProgress={...prev.programProgress,[key]:!prev.programProgress[key]};const next={...prev,programProgress};localStorage.setItem(LS_KEY,JSON.stringify(next));return next;});
+  const toggleDone=(key)=>setSt(prev=>{
+    const cur=prev.programProgress?.[key]||{done:false,count:0,history:[]};
+    const programProgress={...prev.programProgress,[key]:{...cur,done:!cur.done}};
+    const next={...prev,programProgress};localStorage.setItem(LS_KEY,JSON.stringify(next));return next;
+  });
+  const logPass=(key)=>setSt(prev=>{
+    const cur=prev.programProgress?.[key]||{done:false,count:0,history:[]};
+    const history=[...(cur.history||[]),Date.now()].slice(-30);
+    const programProgress={...prev.programProgress,[key]:{...cur,count:(cur.count||0)+1,history}};
+    const next={...prev,programProgress};localStorage.setItem(LS_KEY,JSON.stringify(next));return next;
+  });
+  const unlogPass=(key)=>setSt(prev=>{
+    const cur=prev.programProgress?.[key]||{done:false,count:0,history:[]};
+    if((cur.count||0)<=0)return prev;
+    const history=(cur.history||[]).slice(0,-1);
+    const programProgress={...prev.programProgress,[key]:{...cur,count:cur.count-1,history}};
+    const next={...prev,programProgress};localStorage.setItem(LS_KEY,JSON.stringify(next));return next;
+  });
   const totalItems=PROGRAM.reduce((a,sec)=>{if(sec.items)return a+sec.items.length;return a+(sec.subsections||[]).reduce((b,sub)=>b+sub.items.length,0);},0);
-  const doneItems=Object.values(prog).filter(Boolean).length;
+  const doneItems=Object.values(prog).filter(p=>p&&p.done).length;
+  const totalPasses=Object.values(prog).reduce((a,p)=>a+(p?.count||0),0);
   const globalPct=totalItems?Math.round(doneItems/totalItems*100):0;
   const match=(t)=>!search||t.toLowerCase().includes(search.toLowerCase());
+  const fmtDate=(ts)=>ts?new Date(ts).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):null;
   return(<div>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:6}}>
-      <div><div style={S.ttl}>Programme CNG</div><div style={S.sub}>Coche chaque notion maîtrisée · 5 sections officielles</div></div>
-      <div style={{textAlign:"right"}}>
-        <div style={{fontFamily:"'Syne',sans-serif",fontSize:"1.6rem",fontWeight:800,color:C.accent3}}>{globalPct}%</div>
-        <div style={{fontSize:"0.7rem",color:C.text2,...S.mono}}>{doneItems}/{totalItems} notions</div>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:6,flexWrap:"wrap",gap:12}}>
+      <div><div style={S.ttl}>Programme CNG</div><div style={S.sub}>Coche chaque notion maîtrisée, et ajoute un passage (+) à chaque révision · 5 sections officielles</div></div>
+      <div style={{display:"flex",gap:20}}>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontFamily:"'Syne',sans-serif",fontSize:"1.6rem",fontWeight:800,color:C.accent3}}>{globalPct}%</div>
+          <div style={{fontSize:"0.7rem",color:C.text2,...S.mono}}>{doneItems}/{totalItems} notions</div>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontFamily:"'Syne',sans-serif",fontSize:"1.6rem",fontWeight:800,color:C.accent4}}>{totalPasses}</div>
+          <div style={{fontSize:"0.7rem",color:C.text2,...S.mono}}>passages total</div>
+        </div>
       </div>
     </div>
-    <div style={{height:5,background:C.surface2,borderRadius:50,marginBottom:20,overflow:"hidden"}}><div style={{height:"100%",width:`${globalPct}%`,background:`linear-gradient(90deg,${C.accent},${C.accent3})`,borderRadius:50,transition:"width 0.4s"}}/></div>
+    <div style={{height:5,background:C.surface2,borderRadius:50,marginBottom:20,overflow:"hidden"}}><div style={{height:"100%",width:`${globalPct}%`,background:`linear-gradient(90deg,${C.accent},${C.accent6},${C.accent3})`,borderRadius:50,transition:"width 0.4s"}}/></div>
     <input style={{...S.inp,marginBottom:18}} placeholder="🔍 Rechercher une notion..." value={search} onChange={e=>setSearch(e.target.value)}/>
     {PROGRAM.map((sec,si)=>{
       const secItems=sec.items?sec.items.map(item=>({key:`${si}_${item}`,item})):(sec.subsections||[]).flatMap((sub,subi)=>sub.items.map(item=>({key:`${si}_${subi}_${item}`,item})));
-      const secDone=secItems.filter(({key})=>prog[key]).length;
+      const secDone=secItems.filter(({key})=>prog[key]?.done).length;
       const secPct=secItems.length?Math.round(secDone/secItems.length*100):0;
       const visible=secItems.filter(({item})=>match(item));
       if(search&&visible.length===0)return null;
-      return(<div key={si} style={S.card({marginBottom:14,borderLeft:`3px solid ${sec.color}`})}>
+      return(<div key={si} style={S.card({marginBottom:14,borderLeft:`3px solid ${sec.color}`,boxShadow:`0 0 26px ${sec.color}10`})}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
           <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:"0.86rem",color:sec.color}}>{sec.section}</div>
           <div style={{display:"flex",gap:10}}><span style={{...S.mono,fontSize:"0.7rem",color:C.text2}}>{secDone}/{secItems.length}</span><span style={{...S.mono,fontSize:"0.7rem",color:sec.color}}>{secPct}%</span></div>
         </div>
         <div style={{height:2,background:C.surface2,borderRadius:50,marginBottom:12,overflow:"hidden"}}><div style={{height:"100%",width:`${secPct}%`,background:sec.color,borderRadius:50,transition:"width 0.4s"}}/></div>
         {sec.items
-          ?sec.items.filter(item=>match(item)).map(item=><ItemRow key={`${si}_${item}`} keyId={`${si}_${item}`} label={item} done={!!prog[`${si}_${item}`]} color={sec.color} onToggle={toggle}/>)
+          ?sec.items.filter(item=>match(item)).map(item=>{const k=`${si}_${item}`;return <ItemRow key={k} keyId={k} label={item} done={!!prog[k]?.done} count={prog[k]?.count||0} lastDate={fmtDate(prog[k]?.history?.slice(-1)[0])} color={sec.color} onToggleDone={toggleDone} onLogPass={logPass} onUnlogPass={unlogPass}/>;})
           :(sec.subsections||[]).map((sub,subi)=>{
               const sv=sub.items.filter(item=>match(item));
               if(search&&sv.length===0)return null;
-              const sd=sub.items.filter(item=>!!prog[`${si}_${subi}_${item}`]).length;
+              const sd=sub.items.filter(item=>!!prog[`${si}_${subi}_${item}`]?.done).length;
               return(<div key={subi} style={{marginBottom:10}}>
                 <div style={{fontSize:"0.72rem",color:C.text2,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:5,display:"flex",justifyContent:"space-between"}}><span>{sub.title}</span><span style={{...S.mono,color:sec.color}}>{sd}/{sub.items.length}</span></div>
-                {sv.map(item=><ItemRow key={`${si}_${subi}_${item}`} keyId={`${si}_${subi}_${item}`} label={item} done={!!prog[`${si}_${subi}_${item}`]} color={sec.color} onToggle={toggle}/>)}
+                {sv.map(item=>{const k=`${si}_${subi}_${item}`;return <ItemRow key={k} keyId={k} label={item} done={!!prog[k]?.done} count={prog[k]?.count||0} lastDate={fmtDate(prog[k]?.history?.slice(-1)[0])} color={sec.color} onToggleDone={toggleDone} onLogPass={logPass} onUnlogPass={unlogPass}/>;})}
               </div>);
             })
         }
@@ -593,7 +680,7 @@ function Flashcards({st,setSt}){
       :<div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:18}}>
         <div onClick={()=>setFlipped(f=>!f)} style={{width:"100%",maxWidth:500,height:230,perspective:1000,cursor:"pointer"}}>
           <div style={{width:"100%",height:"100%",position:"relative",transformStyle:"preserve-3d",transition:"transform 0.45s cubic-bezier(0.4,0,0.2,1)",transform:flipped?"rotateY(180deg)":"rotateY(0)"}}>
-            <div style={{position:"absolute",inset:0,backfaceVisibility:"hidden",borderRadius:18,background:`linear-gradient(135deg,${C.surface2},#1e1e30)`,border:`1px solid ${C.accent}55`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"24px 20px",textAlign:"center",gap:10}}>
+            <div style={{position:"absolute",inset:0,backfaceVisibility:"hidden",borderRadius:18,background:`linear-gradient(135deg,${C.surface2},#ffffff)`,border:`1px solid ${C.accent}55`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"24px 20px",textAlign:"center",gap:10}}>
               <div style={{display:"flex",gap:8,alignItems:"center"}}>
                 <div style={{fontSize:"0.66rem",...S.mono,color:C.accent,textTransform:"uppercase",letterSpacing:1.5,background:`${C.accent}18`,padding:"3px 12px",borderRadius:50}}>{card?.cat}</div>
                 {reviews[card?.id]&&<div style={{fontSize:"0.62rem",color:C.text2,...S.mono}}>×{reviews[card?.id]?.reps||0}</div>}
@@ -601,7 +688,7 @@ function Flashcards({st,setSt}){
               <div style={{fontFamily:"'Syne',sans-serif",fontSize:"1.1rem",fontWeight:700,lineHeight:1.4}}>{card?.q}</div>
               <div style={{fontSize:"0.7rem",color:C.text2}}>Clique pour révéler →</div>
             </div>
-            <div style={{position:"absolute",inset:0,backfaceVisibility:"hidden",borderRadius:18,background:`linear-gradient(135deg,#0e1e16,#122018)`,border:`1px solid ${C.accent3}55`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"24px 20px",textAlign:"center",gap:8,transform:"rotateY(180deg)"}}>
+            <div style={{position:"absolute",inset:0,backfaceVisibility:"hidden",borderRadius:18,background:`linear-gradient(135deg,#e8fff5,#d8f7ea)`,border:`1px solid ${C.accent3}55`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"24px 20px",textAlign:"center",gap:8,transform:"rotateY(180deg)"}}>
               <div style={{fontSize:"0.66rem",...S.mono,color:C.accent3,textTransform:"uppercase",letterSpacing:1.5,background:`${C.accent3}18`,padding:"3px 12px",borderRadius:50}}>Réponse</div>
               <div style={{fontFamily:"'DM Mono',monospace",fontSize:"1.45rem",fontWeight:600,color:C.accent3,lineHeight:1.3}}>{card?.a}</div>
               {showUnits&&card?.u&&card.u!=="—"&&<div style={{fontSize:"0.76rem",color:C.text2,...S.mono}}>{card.u}</div>}
@@ -763,13 +850,13 @@ function Motivation({st,setSt}){
   const [newObj,setNewObj]=useState("");
   const total=st.subjects.reduce((a,s)=>a+s.chapters.length,0),studied=st.subjects.reduce((a,s)=>a+s.chapters.filter(c=>c.count>0).length,0);
   const totalProg=PROGRAM.reduce((a,sec)=>{if(sec.items)return a+sec.items.length;return a+(sec.subsections||[]).reduce((b,sub)=>b+sub.items.length,0);},0);
-  const doneProg=Object.values(st.programProgress||{}).filter(Boolean).length;
+  const doneProg=Object.values(st.programProgress||{}).filter(p=>p&&p.done).length;
   const toggle=(id)=>setSt(prev=>{const w=getWeekKey();const objectives={...prev.objectives,[w]:(prev.objectives[w]||[]).map(o=>o.id===id?{...o,done:!o.done}:o)};const next={...prev,objectives};localStorage.setItem(LS_KEY,JSON.stringify(next));return next;});
   const addO=()=>{if(!newObj.trim())return;setSt(prev=>{const w=getWeekKey();const objectives={...prev.objectives,[w]:[...(prev.objectives[w]||[]),{id:uid(),text:newObj.trim(),done:false}]};const next={...prev,objectives};localStorage.setItem(LS_KEY,JSON.stringify(next));return next;});setNewObj("");};
   const delO=(id)=>setSt(prev=>{const w=getWeekKey();const objectives={...prev.objectives,[w]:(prev.objectives[w]||[]).filter(o=>o.id!==id)};const next={...prev,objectives};localStorage.setItem(LS_KEY,JSON.stringify(next));return next;});
   return(<div>
     <div style={S.ttl}>Motivation</div><div style={S.sub}>Reste focus sur l'objectif</div>
-    <div style={{background:"linear-gradient(135deg,#1a1a2e,#16213e)",border:`1px solid ${C.accent}44`,borderRadius:18,padding:"28px 24px",textAlign:"center",marginBottom:18}}>
+    <div style={{background:"linear-gradient(135deg,#fff0f6,#f0e8ff)",border:`1px solid ${C.accent}44`,borderRadius:18,padding:"28px 24px",textAlign:"center",marginBottom:18}}>
       <div style={{fontSize:"0.66rem",...S.mono,color:C.accent,textTransform:"uppercase",letterSpacing:2,marginBottom:10}}>Citation du jour</div>
       <div style={{fontFamily:"'Syne',sans-serif",fontSize:"1.1rem",fontWeight:700,lineHeight:1.5,marginBottom:8}}>"{quote.text}"</div>
       <div style={{fontSize:"0.78rem",color:C.accent}}>— {quote.author}</div>
@@ -900,7 +987,8 @@ function Stats({st}){
   const allCards=[...CNG_CARDS,...(st.extraCards||[])];
   const reviews=st.cardReviews||{};
   const totalProg=PROGRAM.reduce((a,sec)=>{if(sec.items)return a+sec.items.length;return a+(sec.subsections||[]).reduce((b,sub)=>b+sub.items.length,0);},0);
-  const doneProg=Object.values(st.programProgress||{}).filter(Boolean).length;
+  const doneProg=Object.values(st.programProgress||{}).filter(p=>p&&p.done).length;
+  const totalPasses=Object.values(st.programProgress||{}).reduce((a,p)=>a+(p?.count||0),0);
   const total=st.subjects.reduce((a,s)=>a+s.chapters.length,0);
   const studied=st.subjects.reduce((a,s)=>a+s.chapters.filter(c=>c.count>0).length,0);
   const sessions=st.annales.flatMap(a=>a.sessions.filter(s=>s.score));
@@ -910,7 +998,7 @@ function Stats({st}){
   // Progression par section CNG
   const secStats=PROGRAM.map(sec=>{
     const items=sec.items?sec.items:(sec.subsections||[]).flatMap(sub=>sub.items);
-    const done=items.filter(item=>{const key=sec.items?`${PROGRAM.indexOf(sec)}_${item}`:`${PROGRAM.indexOf(sec)}_${(sec.subsections||[]).findIndex(sub=>sub.items.includes(item))}_${item}`;return st.programProgress?.[key];}).length;
+    const done=items.filter(item=>{const key=sec.items?`${PROGRAM.indexOf(sec)}_${item}`:`${PROGRAM.indexOf(sec)}_${(sec.subsections||[]).findIndex(sub=>sub.items.includes(item))}_${item}`;return st.programProgress?.[key]?.done;}).length;
     return{name:sec.section.split("—")[1]?.trim()||sec.section,done,total:items.length,color:sec.color,pct:items.length?Math.round(done/items.length*100):0};
   });
 
@@ -930,6 +1018,7 @@ function Stats({st}){
         {val:dueNow,label:"Flashcards dues",color:C.accent2,sub:`${mastered} maîtrisées`},
         {val:pomToday,label:"Pomodoros aujourd'hui",color:C.accent,sub:`${pomToday*25} min focus`},
         {val:(st.streak?.count||0)+"🔥",label:"Streak actuel",color:C.accent4,sub:"jours consécutifs"},
+        {val:totalPasses,label:"Passages programme",color:C.accent6,sub:"toutes notions confondues"},
       ].map((k,i)=><div key={i} style={S.card()}>
         <div style={{fontFamily:"'Syne',sans-serif",fontSize:"1.6rem",fontWeight:800,color:k.color,lineHeight:1}}>{k.val}</div>
         <div style={{fontSize:"0.73rem",color:C.text,marginTop:3,fontWeight:500}}>{k.label}</div>
@@ -1336,13 +1425,16 @@ export default function App(){
     <style>{`
       @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap');
       *{box-sizing:border-box;}
-      ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:#252530;border-radius:4px;}
-      input::placeholder,textarea::placeholder{color:#444460;}
+      ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:#e0c8e8;border-radius:4px;}
+      input::placeholder,textarea::placeholder{color:${C.text3};}
     `}</style>
-    <header style={{padding:"11px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:`1px solid ${C.border}`,background:"rgba(8,8,16,0.96)",backdropFilter:"blur(12px)",position:"sticky",top:0,zIndex:100}}>
-      <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:"1.05rem",letterSpacing:"-0.5px"}}>Internat<span style={{color:C.accent}}>Prep</span></div>
+    <header style={{padding:"11px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:14,flexWrap:"wrap",borderBottom:`1px solid ${C.border}`,background:"rgba(255,251,246,0.88)",backdropFilter:"blur(12px)",position:"sticky",top:0,zIndex:100}}>
+      <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:"1.05rem",letterSpacing:"-0.5px"}}>Internat<span style={{background:`linear-gradient(90deg,${C.accent},${C.accent6},${C.accent5})`,WebkitBackgroundClip:"text",backgroundClip:"text",color:"transparent"}}>Prep</span></div>
+        <CountdownBadge/>
+      </div>
       <nav style={{display:"flex",gap:3,background:C.surface,padding:4,borderRadius:50,border:`1px solid ${C.border}`,flexWrap:"wrap"}}>
-        {TABS.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={{background:tab===t.id?C.accent:"none",border:"none",color:tab===t.id?"#fff":C.text2,fontFamily:"'DM Sans',sans-serif",fontSize:"0.75rem",fontWeight:500,padding:"5px 13px",borderRadius:50,cursor:"pointer",whiteSpace:"nowrap"}}>{t.label}</button>)}
+        {TABS.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={{background:tab===t.id?`linear-gradient(120deg,${C.accent},${C.accent6})`:"none",border:"none",color:tab===t.id?"#fff":C.text2,fontFamily:"'DM Sans',sans-serif",fontSize:"0.75rem",fontWeight:500,padding:"5px 13px",borderRadius:50,cursor:"pointer",whiteSpace:"nowrap",boxShadow:tab===t.id?`0 2px 12px ${C.accent}55`:"none",transition:"all 0.15s"}}>{t.label}</button>)}
       </nav>
     </header>
     <main style={{maxWidth:1100,margin:"0 auto",padding:"24px 18px",overflowY:"auto",maxHeight:"calc(100vh - 52px)"}}>
